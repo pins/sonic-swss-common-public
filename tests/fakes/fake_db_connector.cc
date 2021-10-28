@@ -21,20 +21,20 @@ struct RedisDbKey {
 
 // Parses a string as a RedisDB key. If the key is not in our expected format we
 // return a status failure.
-absl::StatusOr<RedisDbKey> GetRedisDbKey(const std::string& key) {
-  constexpr char kDelimiter[] = ":";
-  std::vector<std::string> split = absl::StrSplit(key, kDelimiter);
+absl::StatusOr<RedisDbKey> GetRedisDbKey(const std::string& key,
+                                         const std::string& delimiter) {
+  std::vector<std::string> split = absl::StrSplit(key, delimiter);
 
   // If there is no ':' character then the key is incorrectly formatted for our
   // use case.
   if (split.size() == 1) {
     return absl::Status(
         absl::StatusCode::kInvalidArgument,
-        absl::StrCat("Key does not have a '", kDelimiter, "': ", key));
+        absl::StrCat("Key does not have a '", delimiter, "': ", key));
   }
   return RedisDbKey{
       .table_name = split[0],
-      .key = absl::StrJoin(split.begin() + 1, split.end(), kDelimiter)};
+      .key = absl::StrJoin(split.begin() + 1, split.end(), delimiter)};
 }
 
 }  // namespace
@@ -80,7 +80,7 @@ std::unordered_map<std::string, std::string> FakeDBConnector::hgetall(
 
   // If we get an invalid key we assume the entry does not exist and return
   // an empty map..
-  auto redis_key = GetRedisDbKey(key);
+  auto redis_key = GetRedisDbKey(key, delimiter_);
   if (!redis_key.ok()) {
     VLOG(1) << "WARNING: " << redis_key.status();
     return empty_map;
@@ -108,7 +108,7 @@ bool FakeDBConnector::exists(const std::string& key) {
 
   // If we get an invalid key we assume the entry does not exist and return
   // false.
-  auto redis_key = GetRedisDbKey(key);
+  auto redis_key = GetRedisDbKey(key, delimiter_);
   if (!redis_key.ok()) {
     VLOG(1) << "WARNING: " << redis_key.status();
     return false;
@@ -132,7 +132,7 @@ int64_t FakeDBConnector::del(const std::string& key) {
   VLOG(1) << "Deleteing key: " << key;
 
   // If we get an invalid key we assume the entry does not exist and return 0.
-  auto redis_key = GetRedisDbKey(key);
+  auto redis_key = GetRedisDbKey(key, delimiter_);
   if (!redis_key.ok()) {
     VLOG(1) << "WARNING: " << redis_key.status();
     return 0;
@@ -182,7 +182,7 @@ void FakeDBConnector::hmset(const std::string& key,
 
   // If we get an invalid key then someone is formatting something wrong
   // internally. So just fail outright.
-  auto redis_key = GetRedisDbKey(key);
+  auto redis_key = GetRedisDbKey(key, delimiter_);
   if (!redis_key.ok()) {
     LOG(FATAL) << "Cannot fake inserting an invalid key: "
                << redis_key.status();

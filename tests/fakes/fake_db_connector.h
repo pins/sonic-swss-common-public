@@ -16,7 +16,8 @@ namespace swss {
 // in a redis DB (e.g. AppDb, ConfigDb, AsicDb, etc.).
 class FakeDBConnector final : public DBConnectorInterface {
  public:
-  FakeDBConnector() = default;
+  explicit FakeDBConnector(const std::string& delimiter)
+      : delimiter_(delimiter) {}
 
   // Not copyable or moveable.
   FakeDBConnector(const FakeDBConnector&) = delete;
@@ -46,6 +47,9 @@ class FakeDBConnector final : public DBConnectorInterface {
   // val: faked table holding all installed entries.
   absl::flat_hash_map<std::string, FakeSonicDbTable*>
       sonic_db_tables_;  // No ownership.
+
+  // Depending on the SONiC database the delimiter can either be a ":" or a "|".
+  std::string delimiter_;
 };
 
 }  // namespace swss
