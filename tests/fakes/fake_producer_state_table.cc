@@ -5,9 +5,9 @@
 namespace swss {
 
 FakeProducerStateTable::FakeProducerStateTable(const std::string &table_name,
-                                               FakeSonicDbTable *app_db_table)
-    : table_name_(table_name), app_db_table_(app_db_table) {
-  LOG_IF(FATAL, app_db_table == nullptr)
+                                               FakeSonicDbTable *sonic_db_table)
+    : table_name_(table_name), sonic_db_table_(sonic_db_table) {
+  LOG_IF(FATAL, sonic_db_table == nullptr)
       << "FakeSonicDbTable cannot be nullptr.";
 }
 
@@ -16,7 +16,8 @@ void FakeProducerStateTable::set(const std::string &key,
                                  const std::string &op,
                                  const std::string &prefix) {
   VLOG(1) << "Insert table entry: " << key;
-  app_db_table_->InsertTableEntry(key, values);
+  sonic_db_table_->InsertTableEntry(key, values);
+  sonic_db_table_->PushNotification(key);
 }
 
 void FakeProducerStateTable::set(
@@ -29,7 +30,8 @@ void FakeProducerStateTable::set(
 void FakeProducerStateTable::del(const std::string &key, const std::string &op,
                                  const std::string &prefix) {
   VLOG(1) << "Delete table entry: " << key;
-  app_db_table_->DeleteTableEntry(key);
+  sonic_db_table_->DeleteTableEntry(key);
+  sonic_db_table_->PushNotification(key);
 }
 
 void FakeProducerStateTable::del(const std::vector<std::string> &keys) {

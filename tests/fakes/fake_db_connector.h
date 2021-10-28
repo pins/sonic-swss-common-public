@@ -23,7 +23,7 @@ class FakeDBConnector final : public DBConnectorInterface {
   FakeDBConnector& operator=(const FakeDBConnector&) = delete;
 
   // Allows access to a fake SONiC Redis DB table.
-  void AddAppDbTable(const std::string& table_name, FakeSonicDbTable* table);
+  void AddSonicDbTable(const std::string& table_name, FakeSonicDbTable* table);
 
   // Faked methods.
   std::vector<std::string> keys(const std::string& glob) override;
@@ -34,10 +34,6 @@ class FakeDBConnector final : public DBConnectorInterface {
   void del(const std::vector<std::string>& keys) override;
   std::shared_ptr<std::string> hget(const std::string& key,
                                     const std::string& field) override;
-
-  // The hmset() method is faked to keep parity with the adapter class. However,
-  // it should not be used directly by the P4RT App. There are usually better
-  // interface alternatives to handle that behavior.
   void hmset(const std::string& key,
              const std::vector<FieldValueTuple>& values) override;
 
@@ -49,7 +45,7 @@ class FakeDBConnector final : public DBConnectorInterface {
   // key: name of the SONiC DB table (i.e. P4RT)
   // val: faked table holding all installed entries.
   absl::flat_hash_map<std::string, FakeSonicDbTable*>
-      app_db_tables_;  // No ownership.
+      sonic_db_tables_;  // No ownership.
 };
 
 }  // namespace swss

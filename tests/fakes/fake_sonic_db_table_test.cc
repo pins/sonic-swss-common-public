@@ -47,7 +47,7 @@ TEST(FakeSonicDbTest, ReadBackEntry) {
   EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
 }
 
-TEST(FakeSonicDbTest, InsertDuplicateKeyOverwritesExistingEntry) {
+TEST(FakeSonicDbTest, InsertDuplicateKeyDoesNotOverwritesExistingEntry) {
   FakeSonicDbTable table;
 
   // First insert.
@@ -61,7 +61,8 @@ TEST(FakeSonicDbTest, InsertDuplicateKeyOverwritesExistingEntry) {
   result = table.ReadTableEntry("entry");
   ASSERT_TRUE(result.ok());
   EXPECT_THAT(*result,
-              UnorderedElementsAre(std::make_pair("new_key", "new_value")));
+              UnorderedElementsAre(std::make_pair("key", "value"),
+                                   std::make_pair("new_key", "new_value")));
 }
 
 TEST(FakeSonicDbTest, DeleteNonExistantEntry) {
@@ -86,7 +87,7 @@ TEST(FakeSonicDbDeathTest, GetNotificationDiesIfNoNotificationExists) {
   FakeSonicDbTable table;
   std::string op;
   std::string data;
-  SonicDbEntry value;
+  SonicDbEntryList value;
 
   EXPECT_DEATH(table.GetNextNotification(op, data, value),
                "Could not find a notification");
@@ -96,21 +97,10 @@ TEST(FakeSonicDbTest, DefaultNotificationResponseIsSuccess) {
   FakeSonicDbTable table;
   std::string op;
   std::string data;
-  SonicDbEntry values;
+  SonicDbEntryList values;
 
   // First insert.
-  table.InsertTableEntry("entry", /*values=*/{});
-  table.GetNextNotification(op, data, values);
-  EXPECT_EQ(op, "SWSS_RC_SUCCESS");
-  EXPECT_EQ(data, "entry");
-  EXPECT_THAT(values,
-              ElementsAre(SonicDbKeyValue{"err_str", "SWSS_RC_SUCCESS"}));
-
-  // Between actions clear the `values` container.
-  values.clear();
-
-  // Then delete.
-  table.DeleteTableEntry("entry");
+  table.PushNotification("entry");
   table.GetNextNotification(op, data, values);
   EXPECT_EQ(op, "SWSS_RC_SUCCESS");
   EXPECT_EQ(data, "entry");
@@ -122,16 +112,149 @@ TEST(FakeSonicDbTest, SetNotificationResponseForKey) {
   FakeSonicDbTable table;
   std::string op;
   std::string data;
-  SonicDbEntry values;
+  SonicDbEntryList values;
 
   table.SetResponseForKey(/*key=*/"entry", /*code=*/"SWSS_RC_UNKNOWN",
                           /*message=*/"my error message");
-  table.InsertTableEntry("entry", /*values=*/{});
+  table.PushNotification("entry");
   table.GetNextNotification(op, data, values);
   EXPECT_EQ(op, "SWSS_RC_UNKNOWN");
   EXPECT_EQ(data, "entry");
   EXPECT_THAT(values,
               ElementsAre(SonicDbKeyValue{"err_str", "my error message"}));
+}
+
+TEST(FakeSonicDbTest, StateDbUpdatedOnInsertSuccess) {
+  FakeSonicDbTable state_table;
+  FakeSonicDbTable table(&state_table);
+
+  table.InsertTableEntry("entry", /*values=*/{{"key", "value"}});
+  table.PushNotification("entry");
+  auto result = table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
+
+  result = state_table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
+}
+
+TEST(FakeSonicDbTest, StateDbUpdatedOnDeleteSuccess) {
+  FakeSonicDbTable state_table;
+  FakeSonicDbTable table(&state_table);
+
+  // First insert
+  table.InsertTableEntry("entry", /*values=*/{{"key", "value"}});
+  table.PushNotification("entry");
+  EXPECT_THAT(table.GetAllKeys(), ElementsAre("entry"));
+  EXPECT_THAT(state_table.GetAllKeys(), ElementsAre("entry"));
+
+  // Then delete.
+  table.DeleteTableEntry("entry");
+  table.PushNotification("entry");
+  EXPECT_TRUE(table.GetAllKeys().empty());
+  EXPECT_TRUE(state_table.GetAllKeys().empty());
+}
+
+TEST(FakeSonicDbTest, StateDbUpdatedOnModifySuccess) {
+  FakeSonicDbTable state_table;
+  FakeSonicDbTable table(&state_table);
+
+  // First insert.
+  table.InsertTableEntry("entry", /*values=*/{{"key", "value"}});
+  table.PushNotification("entry");
+  auto result = table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
+
+  result = state_table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
+
+  // Then modify.
+  table.DeleteTableEntry("entry");
+  table.InsertTableEntry("entry", /*values=*/{});
+  table.PushNotification("entry");
+
+  result = table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_TRUE(result->empty());
+
+  result = state_table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_TRUE(result->empty());
+}
+
+TEST(FakeSonicDbTest, StateDbDoesNotUpdatedOnInsertFailure) {
+  FakeSonicDbTable state_table;
+  FakeSonicDbTable table(&state_table);
+
+  table.SetResponseForKey(/*key=*/"entry", /*code=*/"SWSS_RC_UNKNOWN",
+                          /*message=*/"my error message");
+  table.InsertTableEntry("entry", /*values=*/{{"key", "value"}});
+  table.PushNotification("entry");
+
+  // We still insert the entry, and it is the callers responsiblity to clean it
+  // up on failure.
+  auto result = table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
+
+  // However, on failure the StateDb should not be affected.
+  EXPECT_TRUE(state_table.GetAllKeys().empty());
+}
+
+TEST(FakeSonicDbTest, StateDbDoesNotUpdatedOnDeleteFailure) {
+  FakeSonicDbTable state_table;
+  FakeSonicDbTable table(&state_table);
+
+  // First insert
+  table.InsertTableEntry("entry", /*values=*/{{"key", "value"}});
+  table.PushNotification("entry");
+  EXPECT_THAT(table.GetAllKeys(), ElementsAre("entry"));
+  EXPECT_THAT(state_table.GetAllKeys(), ElementsAre("entry"));
+
+  // Then delete with failure
+  table.SetResponseForKey(/*key=*/"entry", /*code=*/"SWSS_RC_UNKNOWN",
+                          /*message=*/"my error message");
+  table.DeleteTableEntry("entry");
+  table.PushNotification("entry");
+
+  // We still delete the entry, and it is the callers responsiblity to cean it
+  // up on failure.
+  EXPECT_TRUE(table.GetAllKeys().empty());
+
+  // However, on failure the StateDb should not be affected.
+  EXPECT_THAT(state_table.GetAllKeys(), ElementsAre("entry"));
+}
+
+TEST(FakeSonicDbTest, StateDbDoesNotUpdatedOnModifyFailure) {
+  FakeSonicDbTable state_table;
+  FakeSonicDbTable table(&state_table);
+
+  // First insert.
+  table.InsertTableEntry("entry", /*values=*/{{"key", "value"}});
+  table.PushNotification("entry");
+  EXPECT_THAT(table.GetAllKeys(), ElementsAre("entry"));
+  EXPECT_THAT(state_table.GetAllKeys(), ElementsAre("entry"));
+
+  // Then modify with failure.
+  table.DeleteTableEntry("entry");
+  table.SetResponseForKey(/*key=*/"entry", /*code=*/"SWSS_RC_UNKNOWN",
+                          /*message=*/"my error message");
+  table.InsertTableEntry("entry", /*values=*/{});
+  table.PushNotification("entry");
+
+  // We still modify the entry, and it is the callers responsiblity to clean it
+  // up on failure.
+  auto result = table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_TRUE(result->empty());
+
+  // However, on failure the StateDb should not be affected.
+  result = state_table.ReadTableEntry("entry");
+  ASSERT_TRUE(result.ok());
+  EXPECT_THAT(*result, UnorderedElementsAre(std::make_pair("key", "value")));
 }
 
 TEST(FakeSonicDbTest, DebutState) {

@@ -38,8 +38,8 @@ cc_library(
         "//:libswsscommon",
         "@com_github_google_glog//:glog",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -63,8 +63,8 @@ cc_test(
     srcs = ["fake_sonic_db_table_test.cc"],
     deps = [
         ":fake_sonic_db_table",
-        "@com_google_absl//absl/status",
         "@com_github_google_glog//:glog",
+        "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest",
     ],
 )

@@ -39,9 +39,9 @@ absl::StatusOr<RedisDbKey> GetRedisDbKey(const std::string& key) {
 
 }  // namespace
 
-void FakeDBConnector::AddAppDbTable(const std::string& table_name,
-                                    FakeSonicDbTable* table) {
-  app_db_tables_[table_name] = table;
+void FakeDBConnector::AddSonicDbTable(const std::string& table_name,
+                                      FakeSonicDbTable* table) {
+  sonic_db_tables_[table_name] = table;
 }
 
 // Redis KEYS patterns use the glob-style for regular expression matching.
@@ -55,7 +55,7 @@ std::vector<std::string> FakeDBConnector::keys(const std::string& glob) {
 
   // Iterates through every AppDb table and compares the key against the `glob`
   // argument.
-  for (const auto& table : app_db_tables_) {
+  for (const auto& table : sonic_db_tables_) {
     VLOG(2) << "Searching table: " << table.first;
     for (const std::string& key : table.second->GetAllKeys()) {
       // When the DBConnector sees a key it is in the format:
@@ -76,36 +76,31 @@ std::vector<std::string> FakeDBConnector::keys(const std::string& glob) {
 std::unordered_map<std::string, std::string> FakeDBConnector::hgetall(
     const std::string& key) {
   VLOG(1) << "Getting data for key: " << key;
-  std::unordered_map<std::string, std::string> result;
+  std::unordered_map<std::string, std::string> empty_map;
 
   // If we get an invalid key we assume the entry does not exist and return
   // an empty map..
   auto redis_key = GetRedisDbKey(key);
   if (!redis_key.ok()) {
     VLOG(1) << "WARNING: " << redis_key.status();
-    return result;
+    return empty_map;
   }
 
   // If the fake doesn't have visibility into the table then we can't return
   // anything.
-  auto app_db_table_iter = app_db_tables_.find(redis_key->table_name);
-  if (app_db_table_iter == app_db_tables_.end()) {
+  auto sonic_db_table_iter = sonic_db_tables_.find(redis_key->table_name);
+  if (sonic_db_table_iter == sonic_db_tables_.end()) {
     VLOG(1) << "WARNING: Could not find AppDb table: " << redis_key->table_name;
-    return result;
+    return empty_map;
   }
 
   // Otherwise, we try to read the entry values from the table.
-  auto entry_or = app_db_table_iter->second->ReadTableEntry(redis_key->key);
+  auto entry_or = sonic_db_table_iter->second->ReadTableEntry(redis_key->key);
   if (!entry_or.ok()) {
     VLOG(1) << "WARNING: Could not find AppDb entry: " << entry_or.status();
-    return result;
+    return empty_map;
   }
-
-  // Convert the vector of pairs into a map before returning.
-  for (const auto& data : *entry_or) {
-    result[data.first] = data.second;
-  }
-  return result;
+  return *entry_or;
 }
 
 bool FakeDBConnector::exists(const std::string& key) {
@@ -121,15 +116,15 @@ bool FakeDBConnector::exists(const std::string& key) {
 
   // If the fake doesn't have visibility into the table then we also return
   // false.
-  auto app_db_table_iter = app_db_tables_.find(redis_key->table_name);
-  if (app_db_table_iter == app_db_tables_.end()) {
+  auto sonic_db_table_iter = sonic_db_tables_.find(redis_key->table_name);
+  if (sonic_db_table_iter == sonic_db_tables_.end()) {
     VLOG(1) << "WARNING: Could not find AppDb table: " << redis_key->table_name;
     return false;
   }
 
   // Otherwise, we try to find the value. A status failure implies we could not
   // find the key.
-  auto status = app_db_table_iter->second->ReadTableEntry(redis_key->key);
+  auto status = sonic_db_table_iter->second->ReadTableEntry(redis_key->key);
   return status.ok();
 }
 
@@ -144,21 +139,21 @@ int64_t FakeDBConnector::del(const std::string& key) {
   }
 
   // If the fake doesn't have visibility into the table then we also return 0.
-  auto app_db_table_iter = app_db_tables_.find(redis_key->table_name);
-  if (app_db_table_iter == app_db_tables_.end()) {
+  auto sonic_db_table_iter = sonic_db_tables_.find(redis_key->table_name);
+  if (sonic_db_table_iter == sonic_db_tables_.end()) {
     VLOG(1) << "WARNING: Could not find AppDb table: " << redis_key->table_name;
     return 0;
   }
 
   // Otherwise, we try to find the value. A status failure implies we could not
   // find the key so we can't delete it.
-  auto status = app_db_table_iter->second->ReadTableEntry(redis_key->key);
+  auto status = sonic_db_table_iter->second->ReadTableEntry(redis_key->key);
   if (!status.ok()) {
     VLOG(1) << "WARNING: Could not find AppDb entry: " << redis_key->key;
     return 0;
   }
 
-  app_db_table_iter->second->DeleteTableEntry(redis_key->key);
+  sonic_db_table_iter->second->DeleteTableEntry(redis_key->key);
   return 1;
 }
 
@@ -183,10 +178,25 @@ std::shared_ptr<std::string> FakeDBConnector::hget(const std::string& key,
 
 void FakeDBConnector::hmset(const std::string& key,
                             const std::vector<FieldValueTuple>& values) {
-  // We should not be setting anything through this interface. The ownership
-  // of entries should be handled by other interfaces
-  // (e.g. ProducerStateTable, etc.)
-  LOG(FATAL) << "Do not set AppDb entries through DBConnector.";
+  VLOG(1) << "Inserting key: " << key;
+
+  // If we get an invalid key then someone is formatting something wrong
+  // internally. So just fail outright.
+  auto redis_key = GetRedisDbKey(key);
+  if (!redis_key.ok()) {
+    LOG(FATAL) << "Cannot fake inserting an invalid key: "
+               << redis_key.status();
+  }
+
+  // If the fake doesn't have visibility into the table then we also fail
+  // outright.
+  auto sonic_db_table_iter = sonic_db_tables_.find(redis_key->table_name);
+  if (sonic_db_table_iter == sonic_db_tables_.end()) {
+    LOG(FATAL) << "Cannot fake inserting to a table we cannot access: "
+               << redis_key->table_name;
+  }
+
+  sonic_db_table_iter->second->InsertTableEntry(redis_key->key, values);
 }
 
 }  // namespace swss

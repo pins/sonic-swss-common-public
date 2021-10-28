@@ -7,11 +7,11 @@
 
 namespace swss {
 
-// Fake the OrchAgent write path behavior for AppDb table entries.
+// Fake the OrchAgent write path behavior for table entries in a SONiC DB.
 class FakeProducerStateTable final : public ProducerStateTableInterface {
  public:
   FakeProducerStateTable(const std::string &table_name,
-                         FakeSonicDbTable *app_db_table);
+                         FakeSonicDbTable *sonic_db_table);
 
   // Not copyable or moveable.
   FakeProducerStateTable(const FakeProducerStateTable &) = delete;
@@ -31,9 +31,9 @@ class FakeProducerStateTable final : public ProducerStateTableInterface {
  private:
   const std::string table_name_;
 
-  // The AppDb table maintains a list of all installed table entries created by
+  // The SONiC table maintains a list of all installed table entries created by
   // this fake.
-  FakeSonicDbTable *app_db_table_;  // No ownership.
+  FakeSonicDbTable *sonic_db_table_;  // No ownership.
 };
 
 }  // namespace swss
